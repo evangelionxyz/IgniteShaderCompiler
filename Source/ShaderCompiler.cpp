@@ -66,6 +66,223 @@ namespace ignite
             return buffer.str();
         }
 
+        bool ReadTextFile(const std::filesystem::path& filepath, std::string& output)
+        {
+            std::ifstream file(filepath, std::ios::in | std::ios::binary);
+            if (!file)
+            {
+                return false;
+            }
+
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            output = buffer.str();
+            return true;
+        }
+
+        struct ShadercCompileContext
+        {
+            shaderc_compiler* compiler = nullptr;
+            shaderc_compile_options* compileOptions = nullptr;
+            shaderc_compilation_result* compilationResult = nullptr;
+
+            ~ShadercCompileContext()
+            {
+                if (compilationResult)
+                {
+                    shaderc_result_release(compilationResult);
+                }
+
+                if (compileOptions)
+                {
+                    shaderc_compile_options_release(compileOptions);
+                }
+
+                if (compiler)
+                {
+                    shaderc_compiler_release(compiler);
+                }
+            }
+        };
+
+        struct ShadercIncludeContext
+        {
+            std::filesystem::path rootShaderPath;
+            std::vector<std::filesystem::path> includeDirectories;
+        };
+
+        struct ShadercIncludeResultStorage
+        {
+            std::string sourceName;
+            std::string content;
+        };
+
+        std::filesystem::path ResolveShadercIncludePath(const ShadercIncludeContext* context,
+            const char* requestedSource,
+            shaderc_include_type includeType,
+            const char* requestingSource)
+        {
+            if (!context || !requestedSource || requestedSource[0] == '\0')
+            {
+                return {};
+            }
+
+            std::filesystem::path requestedPath(requestedSource);
+            std::error_code ec;
+            if (requestedPath.is_absolute() && std::filesystem::exists(requestedPath, ec) && !ec)
+            {
+                return std::filesystem::weakly_canonical(requestedPath, ec);
+            }
+
+            std::vector<std::filesystem::path> roots;
+            roots.reserve(context->includeDirectories.size() + 2);
+
+            if (includeType == shaderc_include_type_relative)
+            {
+                if (requestingSource && requestingSource[0] != '\0')
+                {
+                    roots.push_back(std::filesystem::path(requestingSource).parent_path());
+                }
+                else
+                {
+                    roots.push_back(context->rootShaderPath.parent_path());
+                }
+            }
+
+            roots.push_back(context->rootShaderPath.parent_path());
+            for (const std::filesystem::path& includeDir : context->includeDirectories)
+            {
+                roots.push_back(includeDir);
+            }
+
+            for (const std::filesystem::path& root : roots)
+            {
+                const std::filesystem::path candidate = root / requestedPath;
+                ec.clear();
+                if (std::filesystem::exists(candidate, ec) && !ec)
+                {
+                    return std::filesystem::weakly_canonical(candidate, ec);
+                }
+            }
+
+            return {};
+        }
+
+        shaderc_include_result* ShadercIncludeResolver(void* userData,
+            const char* requestedSource,
+            int type,
+            const char* requestingSource,
+            size_t /*includeDepth*/)
+        {
+            auto* context = static_cast<ShadercIncludeContext*>(userData);
+            auto* storage = new ShadercIncludeResultStorage();
+            auto* result = new shaderc_include_result();
+
+            std::filesystem::path resolvedPath = ResolveShadercIncludePath(context,
+                requestedSource,
+                static_cast<shaderc_include_type>(type),
+                requestingSource);
+
+            if (!resolvedPath.empty() && ReadTextFile(resolvedPath, storage->content))
+            {
+                storage->sourceName = resolvedPath.generic_string();
+            }
+            else
+            {
+                storage->sourceName = requestedSource ? requestedSource : "<unknown include>";
+                storage->content = "Failed to resolve include '" + storage->sourceName + "'";
+                if (requestingSource && requestingSource[0] != '\0')
+                {
+                    storage->content += " requested from '" + std::string(requestingSource) + "'";
+                }
+                storage->content += ".";
+            }
+
+            result->source_name = storage->sourceName.c_str();
+            result->source_name_length = storage->sourceName.size();
+            result->content = storage->content.c_str();
+            result->content_length = storage->content.size();
+            result->user_data = storage;
+
+            return result;
+        }
+
+        void ShadercIncludeResultReleaser(void* /*userData*/, shaderc_include_result* includeResult)
+        {
+            if (!includeResult)
+            {
+                return;
+            }
+
+            auto* storage = static_cast<ShadercIncludeResultStorage*>(includeResult->user_data);
+            delete storage;
+            delete includeResult;
+        }
+
+        void EmitIgnoredGLSLOptionsWarnings(const CompilerOptions& options)
+        {
+            std::vector<std::string> ignored;
+
+            if (options.pdb)
+            {
+                ignored.push_back("pdb");
+            }
+
+            if (options.embedPdb)
+            {
+                ignored.push_back("embedPdb");
+            }
+
+            if (options.allResourcesBound)
+            {
+                ignored.push_back("allResourcesBound");
+            }
+
+            if (options.matrixRowMajor)
+            {
+                ignored.push_back("matrixRowMajor");
+            }
+
+            if (options.hlsl2021)
+            {
+                ignored.push_back("hlsl2021");
+            }
+
+            if (options.stripReflection)
+            {
+                ignored.push_back("stripReflection");
+            }
+
+            if (options.noRegShifts
+                || options.tRegShift != 0
+                || options.sRegShift != 128
+                || options.bRegShift != 256
+                || options.uRegShift != 384)
+            {
+                ignored.push_back("register shift options (t/s/b/u/noRegShifts)");
+            }
+
+            if (!options.compilerOptions.empty())
+            {
+                ignored.push_back("compilerOptions");
+            }
+
+            if (!ignored.empty())
+            {
+                std::string message = "GLSL(shaderc): ignored option(s): ";
+                for (size_t i = 0; i < ignored.size(); ++i)
+                {
+                    if (i > 0)
+                    {
+                        message += ", ";
+                    }
+                    message += ignored[i];
+                }
+                message += ".";
+                DispatchLog(IGNITE_LOG_TYPE_WARNING, message);
+            }
+        }
+
 #ifdef _WIN32
     // Maps D3D reflection component type to project vertex element format.
         IGNITE_VertexElementFormat IGNITE_Map3DComponent(D3D_REGISTER_COMPONENT_TYPE componentType, uint32_t elementCount)
@@ -567,17 +784,35 @@ namespace ignite
             return resultCode;
         }
 
-        // Initialize shaderc
-        shaderc_compiler *compiler = shaderc_compiler_initialize();
-        shaderc_compile_options *compileOptions = shaderc_compile_options_initialize();
+        EmitIgnoredGLSLOptionsWarnings(options);
 
-        shaderc_compile_options_set_source_language(compileOptions, shaderc_source_language_glsl);
-        shaderc_compile_options_set_target_env(compileOptions, shaderc_target_env_vulkan, IGNITE_ShaderToVulkanEnvVersion(options.shaderDesc.vulkanVersion.c_str()));
-        shaderc_compile_options_set_optimization_level(compileOptions, IGNITE_ShaderToShaderCOptLevel(options.shaderDesc.optLevel));
+        // Initialize shaderc
+        ShadercCompileContext shadercContext = {};
+        shadercContext.compiler = shaderc_compiler_initialize();
+        shadercContext.compileOptions = shaderc_compile_options_initialize();
+
+        if (!shadercContext.compiler || !shadercContext.compileOptions)
+        {
+            DispatchLog(IGNITE_LOG_TYPE_ERROR, "Failed to initialize shaderc compiler/options.");
+            return resultCode;
+        }
+
+        ShadercIncludeContext includeContext = {};
+        includeContext.rootShaderPath = options.filepath;
+        includeContext.includeDirectories = options.includeDirectories;
+
+        shaderc_compile_options_set_include_callbacks(shadercContext.compileOptions,
+            ShadercIncludeResolver,
+            ShadercIncludeResultReleaser,
+            &includeContext);
+
+        shaderc_compile_options_set_source_language(shadercContext.compileOptions, shaderc_source_language_glsl);
+        shaderc_compile_options_set_target_env(shadercContext.compileOptions, shaderc_target_env_vulkan, IGNITE_ShaderToVulkanEnvVersion(options.shaderDesc.vulkanVersion.c_str()));
+        shaderc_compile_options_set_optimization_level(shadercContext.compileOptions, IGNITE_ShaderToShaderCOptLevel(options.shaderDesc.optLevel));
 
         if (options.warningsAreErrors)
         {
-            shaderc_compile_options_set_warnings_as_errors(compileOptions);
+            shaderc_compile_options_set_warnings_as_errors(shadercContext.compileOptions);
         }
 
         for (const std::string& define : options.defines)
@@ -585,13 +820,13 @@ namespace ignite
             size_t equalPos = define.find('=');
             if (equalPos == std::string::npos)
             {
-                shaderc_compile_options_add_macro_definition(compileOptions, define.data(), define.size(), NULL, 0u);
+                shaderc_compile_options_add_macro_definition(shadercContext.compileOptions, define.data(), define.size(), NULL, 0u);
             }
             else
             {
                 std::string name = define.substr(0, equalPos);
                 std::string value = define.substr(equalPos + 1);
-                shaderc_compile_options_add_macro_definition(compileOptions, name.data(), name.size(), value.data(), value.size());
+                shaderc_compile_options_add_macro_definition(shadercContext.compileOptions, name.data(), name.size(), value.data(), value.size());
             }
         }
 
@@ -601,37 +836,38 @@ namespace ignite
         }
 
         std::string outFilenameStr = options.filepath.generic_string();
-        shaderc_compilation_result *compilationResult = shaderc_compile_into_spv(compiler, source.c_str(), source.size(),
+        shadercContext.compilationResult = shaderc_compile_into_spv(shadercContext.compiler, source.c_str(), source.size(),
             IGNITE_ShaderToShaderCKind(options.shaderDesc.shaderType), outFilenameStr.c_str(),
-            options.shaderDesc.entryPoint.c_str(), NULL);
+            options.shaderDesc.entryPoint.c_str(), shadercContext.compileOptions);
 
-        if (compilationResult)
+        if (!shadercContext.compilationResult)
         {
-            shaderc_compilation_status compilationStatus = shaderc_result_get_compilation_status(compilationResult);
-            const size_t numWarnings = shaderc_result_get_num_warnings(compilationResult);
+            DispatchLog(IGNITE_LOG_TYPE_ERROR, "GLSL compilation failed: shaderc returned no result.");
+            return resultCode;
+        }
+
+        if (shadercContext.compilationResult)
+        {
+            shaderc_compilation_status compilationStatus = shaderc_result_get_compilation_status(shadercContext.compilationResult);
+            const size_t numWarnings = shaderc_result_get_num_warnings(shadercContext.compilationResult);
             if (compilationStatus != shaderc_compilation_status_success)
             {
-                std::string errorMessage = shaderc_result_get_error_message(compilationResult);
+                std::string errorMessage = shaderc_result_get_error_message(shadercContext.compilationResult);
                 DispatchLog(IGNITE_LOG_TYPE_ERROR, "GLSL compilation failed: " + errorMessage);
                 return resultCode;
             }
 
             if (numWarnings > 0)
             {
-                std::string errorMessage = shaderc_result_get_error_message(compilationResult);
+                std::string errorMessage = shaderc_result_get_error_message(shadercContext.compilationResult);
                 DispatchLog(IGNITE_LOG_TYPE_WARNING, errorMessage);
             }
         }
         
         // const size_t wordCount = static_cast<size_t>(compileResult.cend() - compileResult.cbegin());
-        const size_t byteCount = shaderc_result_get_length(compilationResult);
+        const size_t byteCount = shaderc_result_get_length(shadercContext.compilationResult);
         resultCode.resize(byteCount);
-        std::memcpy(resultCode.data(), shaderc_result_get_bytes(compilationResult), resultCode.size());
-
-        // Release shaderc
-        shaderc_result_release(compilationResult);
-        shaderc_compile_options_release(compileOptions);
-        shaderc_compiler_release(compiler);
+        std::memcpy(resultCode.data(), shaderc_result_get_bytes(shadercContext.compilationResult), resultCode.size());
 
         std::string outputExtension = IGNITE_ShaderPlatformExtension(options.platformType);
         std::filesystem::path parentPath = options.filepath.parent_path();
