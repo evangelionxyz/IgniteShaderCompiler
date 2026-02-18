@@ -1,8 +1,9 @@
+// Copyright (c) 2026 Evangelion Manuhutu
+
 #ifndef _SHADER_COMPILER_H
 #define _SHADER_COMPILER_H
 
 #pragma once
-
 
 #include <cstdint>
 #include <string>

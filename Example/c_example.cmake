@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Evangelion Manuhutu
+
 set(IGNITECOMPILER_C_EXAMPLE_TARGET IgniteCompilerCExample)
 
 add_executable(${IGNITECOMPILER_C_EXAMPLE_TARGET}

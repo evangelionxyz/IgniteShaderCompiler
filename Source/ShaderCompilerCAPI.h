@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Evangelion Manuhutu
+
 #ifndef _SHADER_COMPILER_CAPI_H
 #define _SHADER_COMPILER_CAPI_H
 

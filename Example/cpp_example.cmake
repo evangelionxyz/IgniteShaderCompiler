@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Evangelion Manuhutu
+
 set(IGNITECOMPILER_CPP_EXAMPLE_TARGET IgniteCompilerCPPExample)
 
 add_executable(${IGNITECOMPILER_CPP_EXAMPLE_TARGET}

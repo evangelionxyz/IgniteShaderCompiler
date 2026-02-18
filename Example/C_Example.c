@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Evangelion Manuhutu
+
 #include "ShaderCompilerCAPI.h"
 
 #include <stdio.h>

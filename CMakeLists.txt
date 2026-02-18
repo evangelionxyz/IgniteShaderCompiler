@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Evangelion Manuhutu
+
 cmake_minimum_required(VERSION 3.20)
 
 project(IgniteCompiler)
