@@ -42,7 +42,26 @@ jobs:
             exit 0
           }
 
-          winget install --id KhronosGroup.VulkanSDK --exact --source winget --accept-source-agreements --accept-package-agreements
+          $wingetStdOut = Join-Path $env:RUNNER_TEMP "winget-vulkan-install.out.log"
+          $wingetStdErr = Join-Path $env:RUNNER_TEMP "winget-vulkan-install.err.log"
+          $wingetArgs = @(
+            "install",
+            "--id", "KhronosGroup.VulkanSDK",
+            "--exact",
+            "--source", "winget",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+            "--disable-interactivity"
+          )
+
+          $wingetProc = Start-Process -FilePath "winget" -ArgumentList $wingetArgs -NoNewWindow -Wait -PassThru -RedirectStandardOutput $wingetStdOut -RedirectStandardError $wingetStdErr
+          if ($wingetProc.ExitCode -ne 0) {
+            Write-Error "Vulkan SDK installation failed with exit code $($wingetProc.ExitCode)."
+            if (Test-Path $wingetStdErr) {
+              Get-Content $wingetStdErr -Tail 100
+            }
+            exit $wingetProc.ExitCode
+          }
 
           $sdkRoot = "C:/VulkanSDK"
           if (-not (Test-Path $sdkRoot)) {
