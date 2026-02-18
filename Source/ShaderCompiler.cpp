@@ -77,8 +77,8 @@ namespace ignite
                 {
                     case 1: return IGNITE_VERTEX_ELEMENT_FORMAT_FLOAT;
                     case 2: return IGNITE_VERTEX_ELEMENT_FORMAT_FLOAT2;
-                    case 3: return IGNITE_VERTEX_ELEMENT_FORMAT_FLOAT2;
-                    case 4: return IGNITE_VERTEX_ELEMENT_FORMAT_FLOAT3;
+                    case 3: return IGNITE_VERTEX_ELEMENT_FORMAT_FLOAT3;
+                    case 4: return IGNITE_VERTEX_ELEMENT_FORMAT_FLOAT4;
                     default: break;
                 }
                 break;
