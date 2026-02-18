@@ -68,17 +68,78 @@ endif()
 
 # linking
 if (WIN32)
-    find_library(DXCOMPILER_LIB
-        NAMES dxcompiler
-        PATHS
+    if (CMAKE_VS_PLATFORM_NAME STREQUAL "Win32")
+        set(VULKAN_SDK_LIB_PATHS
+            "$ENV{VULKAN_SDK}/Lib32"
+            "$ENV{VULKAN_SDK}/Lib/Win32"
             "$ENV{VULKAN_SDK}/Lib"
             "$ENV{VULKAN_SDK}/Lib/x64"
+            "$ENV{VULKAN_SDK}/Lib/arm64"
+            "$ENV{VULKAN_SDK}/Lib/ARM64"
+        )
+    elseif (CMAKE_VS_PLATFORM_NAME STREQUAL "ARM" OR CMAKE_VS_PLATFORM_NAME STREQUAL "ARM64")
+        set(VULKAN_SDK_LIB_PATHS
+            "$ENV{VULKAN_SDK}/Lib/arm64"
+            "$ENV{VULKAN_SDK}/Lib/ARM64"
+            "$ENV{VULKAN_SDK}/Lib"
+            "$ENV{VULKAN_SDK}/Lib/x64"
+            "$ENV{VULKAN_SDK}/Lib32"
+            "$ENV{VULKAN_SDK}/Lib/Win32"
+        )
+    else()
+        set(VULKAN_SDK_LIB_PATHS
+            "$ENV{VULKAN_SDK}/Lib"
+            "$ENV{VULKAN_SDK}/Lib/x64"
+            "$ENV{VULKAN_SDK}/Lib32"
+            "$ENV{VULKAN_SDK}/Lib/Win32"
+            "$ENV{VULKAN_SDK}/Lib/arm64"
+            "$ENV{VULKAN_SDK}/Lib/ARM64"
+        )
+    endif()
+
+    function(ignite_resolve_vulkan_lib outVar baseName)
+        find_library(_${baseName}_RELEASE
+            NAMES ${baseName}
+            PATHS ${VULKAN_SDK_LIB_PATHS}
+            NO_DEFAULT_PATH
+        )
+
+        find_library(_${baseName}_DEBUG
+            NAMES ${baseName}d
+            PATHS ${VULKAN_SDK_LIB_PATHS}
+            NO_DEFAULT_PATH
+        )
+
+        if (NOT _${baseName}_RELEASE)
+            message(FATAL_ERROR "${baseName}.lib not found in Vulkan SDK. Checked: ${VULKAN_SDK_LIB_PATHS}")
+        endif()
+
+        if (_${baseName}_DEBUG)
+            set(${outVar} "$<$<CONFIG:Debug>:${_${baseName}_DEBUG}>$<$<NOT:$<CONFIG:Debug>>:${_${baseName}_RELEASE}>" PARENT_SCOPE)
+        else()
+            message(WARNING "${baseName}d.lib not found. Using ${baseName}.lib for Debug configuration.")
+            set(${outVar} "${_${baseName}_RELEASE}" PARENT_SCOPE)
+        endif()
+    endfunction()
+
+    find_library(DXCOMPILER_LIB
+        NAMES dxcompiler
+        PATHS ${VULKAN_SDK_LIB_PATHS}
         NO_DEFAULT_PATH
     )
 
     if (NOT DXCOMPILER_LIB)
         message(FATAL_ERROR "dxcompiler.lib not found. Please install DXC/Vulkan SDK and set VULKAN_SDK.")
     endif()
+
+    ignite_resolve_vulkan_lib(SHADERC_SHARED_LIB shaderc_shared)
+    ignite_resolve_vulkan_lib(SPIRV_CROSS_C_LIB spirv-cross-c)
+    ignite_resolve_vulkan_lib(SPIRV_CROSS_CORE_LIB spirv-cross-core)
+    ignite_resolve_vulkan_lib(SPIRV_CROSS_GLSL_LIB spirv-cross-glsl)
+    ignite_resolve_vulkan_lib(SPIRV_CROSS_HLSL_LIB spirv-cross-hlsl)
+    ignite_resolve_vulkan_lib(SPIRV_CROSS_MSL_LIB spirv-cross-msl)
+    ignite_resolve_vulkan_lib(SPIRV_CROSS_CPP_LIB spirv-cross-cpp)
+    ignite_resolve_vulkan_lib(SPIRV_CROSS_REFLECT_LIB spirv-cross-reflect)
 
     target_include_directories(IgniteCompiler PRIVATE "$ENV{VULKAN_SDK}/Include")
     target_link_libraries(IgniteCompiler PRIVATE
@@ -89,23 +150,14 @@ if (WIN32)
         "d3dcompiler"
         "dxguid"
 
-        $<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/shaderc_sharedd.lib>
-        $<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/spirv-cross-cd.lib>
-        $<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/spirv-cross-cored.lib>
-        $<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/spirv-cross-glsld.lib>
-        $<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/spirv-cross-hlsld.lib>
-        $<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/spirv-cross-msld.lib>
-        $<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/spirv-cross-cppd.lib>
-        $<$<CONFIG:Debug>:$ENV{VULKAN_SDK}/Lib/spirv-cross-reflectd.lib>
-        
-        $<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/shaderc_shared.lib>
-        $<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/spirv-cross-c.lib>
-        $<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/spirv-cross-core.lib>
-        $<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/spirv-cross-glsl.lib>
-        $<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/spirv-cross-hlsl.lib>
-        $<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/spirv-cross-msl.lib>
-        $<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/spirv-cross-cpp.lib>
-        $<$<NOT:$<CONFIG:Debug>>:$ENV{VULKAN_SDK}/Lib/spirv-cross-reflect.lib>
+        ${SHADERC_SHARED_LIB}
+        ${SPIRV_CROSS_C_LIB}
+        ${SPIRV_CROSS_CORE_LIB}
+        ${SPIRV_CROSS_GLSL_LIB}
+        ${SPIRV_CROSS_HLSL_LIB}
+        ${SPIRV_CROSS_MSL_LIB}
+        ${SPIRV_CROSS_CPP_LIB}
+        ${SPIRV_CROSS_REFLECT_LIB}
     )
 elseif (UNIX AND NOT APPLE)
     target_include_directories(IgniteCompiler PRIVATE "/usr/include")
