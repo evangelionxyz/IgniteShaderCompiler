@@ -93,12 +93,71 @@ jobs:
 
           Write-Host "Using VULKAN_SDK=$env:VULKAN_SDK"
 
+      - name: Verify Vulkan libs for target architecture
+        id: vulkan_libs
+        shell: pwsh
+        run: |
+          $requiredLibs = @(
+            "shaderc_shared.lib",
+            "spirv-cross-c.lib",
+            "spirv-cross-core.lib",
+            "spirv-cross-glsl.lib",
+            "spirv-cross-hlsl.lib",
+            "spirv-cross-msl.lib",
+            "spirv-cross-cpp.lib",
+            "spirv-cross-reflect.lib"
+          )
+
+          $candidateDirs = switch ("${{ matrix.arch }}") {
+            "x64" { @("$env:VULKAN_SDK/Lib", "$env:VULKAN_SDK/Lib/x64") }
+            "x86" { @("$env:VULKAN_SDK/Lib32", "$env:VULKAN_SDK/Lib/Win32") }
+            "arm" { @("$env:VULKAN_SDK/Lib/arm64", "$env:VULKAN_SDK/Lib/ARM64") }
+            default { @("$env:VULKAN_SDK/Lib") }
+          }
+
+          $resolvedDir = $null
+          foreach ($dir in $candidateDirs) {
+            if (-not (Test-Path $dir)) {
+              continue
+            }
+
+            $missing = @()
+            foreach ($lib in $requiredLibs) {
+              if (-not (Test-Path (Join-Path $dir $lib))) {
+                $missing += $lib
+              }
+            }
+
+            if ($missing.Count -eq 0) {
+              $resolvedDir = $dir
+              break
+            }
+          }
+
+          if ($resolvedDir) {
+            Write-Host "Using Vulkan libs from $resolvedDir"
+            "can_build=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "vulkan_lib_dir=$resolvedDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+          else {
+            Write-Warning "Skipping ${{ matrix.arch }} build: required Vulkan libs are not available for this architecture in $env:VULKAN_SDK."
+            "can_build=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
       - name: Configure (${{ matrix.arch }})
+        if: steps.vulkan_libs.outputs.can_build == 'true'
         shell: pwsh
         run: |
           cmake -S . -B build/${{ matrix.arch }} -G "Visual Studio 17 2022" -A ${{ matrix.vs_platform }} -DIGNITECOMPILER_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra_args }}
 
       - name: Build ${{ matrix.build_config }} (${{ matrix.arch }})
+        if: steps.vulkan_libs.outputs.can_build == 'true'
         shell: pwsh
         run: |
           cmake --build build/${{ matrix.arch }} --config ${{ matrix.build_config }} --parallel
+
+      - name: Mark skipped architecture
+        if: steps.vulkan_libs.outputs.can_build != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "Skipped compile for ${{ matrix.arch }} on hosted runner due to missing architecture-specific Vulkan prebuilt libraries."
