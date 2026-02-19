@@ -18,10 +18,16 @@ jobs:
         include:
           - arch: x64
             vs_platform: x64
+            cmake_extra_args: ""
+            build_config: Release
           - arch: x86
             vs_platform: Win32
+            cmake_extra_args: ""
+            build_config: Release
           - arch: arm
-            vs_platform: ARM
+            vs_platform: ARM64
+            cmake_extra_args: ""
+            build_config: Release
 
     steps:
       - name: Checkout
@@ -90,9 +96,9 @@ jobs:
       - name: Configure (${{ matrix.arch }})
         shell: pwsh
         run: |
-          cmake -S . -B build/${{ matrix.arch }} -G "Visual Studio 17 2022" -A ${{ matrix.vs_platform }} -DIGNITECOMPILER_BUILD_EXAMPLES=ON
+          cmake -S . -B build/${{ matrix.arch }} -G "Visual Studio 17 2022" -A ${{ matrix.vs_platform }} -DIGNITECOMPILER_BUILD_EXAMPLES=ON ${{ matrix.cmake_extra_args }}
 
-      - name: Build Debug (${{ matrix.arch }})
+      - name: Build ${{ matrix.build_config }} (${{ matrix.arch }})
         shell: pwsh
         run: |
-          cmake --build build/${{ matrix.arch }} --config Debug --parallel
+          cmake --build build/${{ matrix.arch }} --config ${{ matrix.build_config }} --parallel
